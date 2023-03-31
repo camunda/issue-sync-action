@@ -1,5 +1,3 @@
-import { Label } from "./labelSyncer";
-
 export class Issue {
     id: number;
     title: string;
@@ -9,8 +7,17 @@ export class Issue {
     labels: Label[];
 }
 
-
 export class IssueComment {
     id: number;
     body?: string;
+}
+
+export class Label {
+    id: number;
+    node_id: string;
+    url: string;
+    name: string;
+    description: string | null;
+    color: string;
+    default: boolean;
 }

@@ -1,14 +1,6 @@
 import { GitHub } from './github';
+import { Label } from './issue';
 
-export class Label {
-    id: number;
-    node_id: string;
-    url: string;
-    name: string;
-    description: string | null;
-    color: string;
-    default: boolean;
-}
 
 export class LabelSyncer {
     public static syncLabels(gitHubSource: GitHub, gitHubTarget: GitHub): Promise<void> {
@@ -43,8 +35,8 @@ export class LabelSyncer {
                             element.name,
                             element.description || "",
                             element.color
-                        ).then(() => "Successfully synced label " + element.name)
-                        .catch((err) => "Failed to sync label " + element.name + ": " + err);
+                        ).then(() => `Successfully synced label ${element.name}`)
+                        .catch((err) => `Failed to sync label ${element.name}: ${err}`);
                     })
                     ).then((results) => {
                         results.forEach(element => console.log(element));

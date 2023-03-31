@@ -15,6 +15,7 @@ export class GitHub {
         return this.octokit.request('GET /repos/{owner}/{repo}/labels', {
             owner: this.owner,
             repo: this.repo,
+            per_page: 100,
         }).then((response) => {
             console.log(`Received ${response.data.length} labels for ${this.owner}/${this.repo}`)
             return response
@@ -105,7 +106,7 @@ export class GitHub {
             q: `repo:${this.owner}/${this.repo}+in:title+type:issue+${issueTitle}`,
             sort: 'created',
             order: 'asc',
-            per_page: 100
+            per_page: 100,
         }).then((response) => {
             console.log(`Found a total of ${response.data.total_count} issues that fit the query.`);
             const targetIssue = response.data.items.find(targetIssue => targetIssue.title === issueTitle);
