@@ -4,3 +4,4 @@ dist
 lib
 README.md
 **/*.yml
+**/*.json
