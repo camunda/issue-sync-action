@@ -25,6 +25,6 @@ jobs:
       - name: Run the typescript action
         uses: ./
         with:
-          repo_target: "Braustuben/synctest-target"
-          only_sync_on_label: "a yellow submarine"
+          repo_target: 'Braustuben/synctest-target'
+          only_sync_on_label: 'a yellow submarine'
           only_sync_main_issue: true
