@@ -53,6 +53,19 @@ export class GitHub {
             })
     }
 
+    public deleteIssue(issueNumber: number): Promise<any> {
+        return this.octokit
+            .request('DELETE /repos/{owner}/{repo}/issues/{issue_number}', {
+                owner: this.owner,
+                repo: this.repo,
+                issue_number: issueNumber,
+            })
+            .then(response => {
+                console.log(`Deleted issue ${this.owner}/${this.repo}/${issueNumber}`)
+                return response
+            })
+    }
+
     public editIssue(
         issueNumber: number,
         title: string,

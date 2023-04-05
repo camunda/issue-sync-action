@@ -43987,6 +43987,18 @@ class GitHub {
             return response;
         });
     }
+    deleteIssue(issueNumber) {
+        return this.octokit
+            .request('DELETE /repos/{owner}/{repo}/issues/{issue_number}', {
+            owner: this.owner,
+            repo: this.repo,
+            issue_number: issueNumber,
+        })
+            .then(response => {
+            console.log(`Deleted issue ${this.owner}/${this.repo}/${issueNumber}`);
+            return response;
+        });
+    }
     editIssue(issueNumber, title, body, state, state_reason, labels) {
         return this.octokit
             .request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
@@ -44284,139 +44296,142 @@ if (syncRepoLabels) {
 const payload = require(process.env.GITHUB_EVENT_PATH);
 const number = (payload.issue || payload.pull_request || payload).number;
 const action = payload.action;
-// retrieve issue by owner, repo and number from octokit
-gitHubSource
-    .getIssue(number)
-    .then(response => {
-    // Retrieved issue
-    const issue = response.data;
-    const labels = [...new Set(issue.labels.map(label => label.name).concat(additionalIssueLabels))];
-    console.log(`Found issue ${number}: ${issue.title}`);
-    console.log(`Labels: ${labels}`);
-    // If flag for only syncing labelled issues is set, check if issue has label of specified sync type
-    if (ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL))
-        return;
-    switch (process.env.GITHUB_EVENT_NAME) {
-        case 'issue_comment':
-            // If flag for only syncing issue bodies is set and skip if true
-            if (ONLY_SYNC_MAIN_ISSUE)
-                return;
-            gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
-                console.log(`target_issue_id:${targetIssueNumber}`);
-                core.setOutput('issue_id_target', targetIssueNumber);
-                const sourceComment = payload.comment;
-                const issueCommentBody = utils.getIssueCommentTargetBody(sourceComment);
-                if (action == 'created') {
-                    gitHubTarget.createComment(targetIssueNumber, issueCommentBody).then(response => {
-                        // set target comment id for GH output
-                        core.setOutput('comment_id_target', response.data.id);
-                        gitHubSource.reactOnComment(sourceComment.id, 'rocket');
-                        console.info('Successfully created new comment on issue');
-                    });
-                }
-                else {
-                    // edited or deleted
-                    gitHubTarget.getComments(targetIssueNumber).then(targetComments => {
-                        const targetCommentMatch = utils.findTargetComment(sourceComment, targetComments);
-                        if (targetCommentMatch) {
-                            if (action == 'edited') {
-                                gitHubTarget.editComment(targetCommentMatch.id, issueCommentBody).then(response => {
-                                    // set target comment id for GH output
-                                    core.setOutput('comment_id_target', response.data.id);
-                                    console.info('Successfully updated a comment on issue');
-                                });
-                            }
-                            else if (action == 'deleted') {
-                                gitHubTarget.deleteComment(targetCommentMatch.id);
-                            }
-                        }
-                    });
-                }
-            });
+const issue = payload.issue;
+const labels = [...new Set(issue.labels.map(label => label.name).concat(additionalIssueLabels))];
+let skipSync = ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL);
+console.log(payload.issue); // TODO remove me
+console.log(`Found issue ${number}: ${issue.title}`);
+console.log(`Labels: ${labels}`);
+console.log(`Skip sync: ${skipSync}`);
+gitHubTarget.deleteIssue(7); // TODO remove me
+skipSync = true;
+switch (process.env.GITHUB_EVENT_NAME) {
+    case 'issue_comment':
+        // If flag for only syncing issue bodies is set and skip if true
+        if (ONLY_SYNC_MAIN_ISSUE || skipSync) {
             break;
-        case 'issues':
-            // If the issue was updated, we need to sync labels
-            const issueBody = utils.getIssueTargetBody(issue);
-            switch (action) {
-                case 'opened':
-                    // Create new issue in target repo
-                    gitHubTarget
-                        .createIssue(issue.title, issueBody, labels)
-                        .then(response => {
-                        console.log('Created issue:', response.data.title);
-                        // set target issue id for GH output
-                        console.log(`target_issue_id:${response.data.id}`);
-                        core.setOutput('issue_id_target', response.data.id);
-                        gitHubSource.reactOnIssue(number, 'rocket');
-                    })
-                        .catch(err => {
-                        let msg = 'Error creating issue:';
-                        console.error(msg, err);
-                        core.setFailed(`${msg} ${err}`);
-                    });
-                    break;
-                case 'edited':
-                case 'closed':
-                case 'reopened':
-                case 'labeled':
-                case 'unlabeled':
-                    gitHubTarget
-                        .getIssueNumberByTitle(issue.title)
-                        .then(targetIssueNumber => {
-                        if (targetIssueNumber) {
-                            // set target issue id for GH output
-                            console.log(`target_issue_id:${targetIssueNumber}`);
-                            core.setOutput('issue_id_target', targetIssueNumber);
-                            // Update issue in target repo
-                            // Update issue in target repo, identify target repo issue number by title match
-                            gitHubTarget
-                                .editIssue(targetIssueNumber, issue.title, issueBody, issue.state, issue.state_reason, labels)
-                                .then(response => {
-                                console.log('Updated issue:', response.data.title);
-                                gitHubSource.reactOnIssue(number, 'rocket');
-                            })
-                                .catch(err => {
-                                console.error('Error updating issue:', err);
+        }
+        gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
+            console.log(`target_issue_id:${targetIssueNumber}`);
+            core.setOutput('issue_id_target', targetIssueNumber);
+            const sourceComment = payload.comment;
+            const issueCommentBody = utils.getIssueCommentTargetBody(sourceComment);
+            if (action == 'created') {
+                gitHubTarget.createComment(targetIssueNumber, issueCommentBody).then(response => {
+                    // set target comment id for GH output
+                    core.setOutput('comment_id_target', response.data.id);
+                    gitHubSource.reactOnComment(sourceComment.id, 'rocket');
+                    console.info('Successfully created new comment on issue');
+                });
+            }
+            else {
+                // edited or deleted
+                gitHubTarget.getComments(targetIssueNumber).then(targetComments => {
+                    const targetCommentMatch = utils.findTargetComment(sourceComment, targetComments);
+                    if (targetCommentMatch) {
+                        if (action == 'edited') {
+                            gitHubTarget.editComment(targetCommentMatch.id, issueCommentBody).then(response => {
+                                // set target comment id for GH output
+                                core.setOutput('comment_id_target', response.data.id);
+                                console.info('Successfully updated a comment on issue');
                             });
                         }
-                        else {
-                            console.error('Could not find matching issue in target repo for title', issue.title);
-                            if (CREATE_ISSUES_ON_EDIT || action == 'labeled') {
-                                // Create issue anew
-                                gitHubTarget
-                                    .createIssue(issue.title, issueBody, labels)
-                                    .then(response => {
-                                    // set target issue id for GH output
-                                    core.setOutput('issue_id_target', response.data.number);
-                                    console.log('Created issue for lack of a match:', response.data.title);
-                                })
-                                    .catch(err => {
-                                    let msg = 'Error creating issue for lack of a match:';
-                                    console.error(msg, err);
-                                    core.setFailed(`${msg} ${err}`);
-                                });
-                            }
+                        else if (action == 'deleted') {
+                            gitHubTarget.deleteComment(targetCommentMatch.id);
                         }
-                    })
-                        .catch(err => {
-                        let msg = 'Error finding issue in target repo:';
-                        console.error(msg, err);
-                        core.setFailed(`${msg} ${err}`);
-                    });
-                    break;
-                default:
-                    console.log(`We are currently not handling events of type ${action}`);
-                    break;
+                    }
+                });
             }
+        });
+        break;
+    case 'issues':
+        if (skipSync) {
             break;
-        default:
-            break;
-    }
-})
-    .catch(err => {
-    console.error('Failed to retrieve issue', err);
-    core.setFailed(`Failed to retrieve issue ${err}`);
-});
+        }
+        // If the issue was updated, we need to sync labels
+        const issueBody = utils.getIssueTargetBody(issue);
+        switch (action) {
+            case 'opened':
+                // Create new issue in target repo
+                gitHubTarget
+                    .createIssue(issue.title, issueBody, labels)
+                    .then(response => {
+                    console.log('Created issue:', response.data.title);
+                    // set target issue id for GH output
+                    console.log(`target_issue_id:${response.data.id}`);
+                    core.setOutput('issue_id_target', response.data.id);
+                    gitHubSource.reactOnIssue(number, 'rocket');
+                })
+                    .catch(err => {
+                    let msg = 'Error creating issue:';
+                    console.error(msg, err);
+                    core.setFailed(`${msg} ${err}`);
+                });
+                break;
+            case 'deleted':
+                gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
+                    if (targetIssueNumber) {
+                        gitHubTarget.deleteIssue(targetIssueNumber);
+                    }
+                });
+                break;
+            case 'edited':
+            case 'closed':
+            case 'reopened':
+            case 'labeled':
+            case 'unlabeled':
+                gitHubTarget
+                    .getIssueNumberByTitle(issue.title)
+                    .then(targetIssueNumber => {
+                    if (targetIssueNumber) {
+                        // set target issue id for GH output
+                        console.log(`target_issue_id:${targetIssueNumber}`);
+                        core.setOutput('issue_id_target', targetIssueNumber);
+                        // Update issue in target repo
+                        // Update issue in target repo, identify target repo issue number by title match
+                        gitHubTarget
+                            .editIssue(targetIssueNumber, issue.title, issueBody, issue.state, issue.state_reason, labels)
+                            .then(response => {
+                            console.log('Updated issue:', response.data.title);
+                            gitHubSource.reactOnIssue(number, 'rocket');
+                        })
+                            .catch(err => {
+                            console.error('Error updating issue:', err);
+                        });
+                    }
+                    else {
+                        console.error('Could not find matching issue in target repo for title', issue.title);
+                        if (CREATE_ISSUES_ON_EDIT || action == 'labeled') {
+                            // Create issue anew
+                            gitHubTarget
+                                .createIssue(issue.title, issueBody, labels)
+                                .then(response => {
+                                // set target issue id for GH output
+                                core.setOutput('issue_id_target', response.data.number);
+                                console.log('Created issue for lack of a match:', response.data.title);
+                            })
+                                .catch(err => {
+                                let msg = 'Error creating issue for lack of a match:';
+                                console.error(msg, err);
+                                core.setFailed(`${msg} ${err}`);
+                            });
+                        }
+                    }
+                })
+                    .catch(err => {
+                    let msg = 'Error finding issue in target repo:';
+                    console.error(msg, err);
+                    core.setFailed(`${msg} ${err}`);
+                });
+                break;
+            default:
+                console.log(`We are currently not handling events of type ${action}`);
+                break;
+        }
+        break;
+    default:
+        break;
+}
 
 
 /***/ }),
