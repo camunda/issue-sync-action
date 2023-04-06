@@ -44177,6 +44177,7 @@ let syncRepoLabels;
 let targetIssueFooterTemplate = '';
 let targetCommentFooterTemplate = '';
 let issueCreatedCommentTemplate = '';
+let useCommentForIssueMatching = false;
 let ONLY_SYNC_ON_LABEL;
 let CREATE_ISSUES_ON_EDIT;
 let ONLY_SYNC_MAIN_ISSUE;
@@ -44209,6 +44210,7 @@ if (process.env.CI == 'true') {
         .filter(x => x);
     skippedCommentMessage = core.getInput('skipped_comment_message');
     issueCreatedCommentTemplate = core.getInput('issue_created_comment_template');
+    useCommentForIssueMatching = core.getBooleanInput('use_comment_for_issue_matching');
     ONLY_SYNC_ON_LABEL = core.getInput('only_sync_on_label');
     CREATE_ISSUES_ON_EDIT = core.getBooleanInput('create_issues_on_edit');
     ONLY_SYNC_MAIN_ISSUE = core.getBooleanInput('only_sync_main_issue');
@@ -44275,6 +44277,9 @@ else {
         else if (launchArgs[i] == '--issue_created_comment_template') {
             issueCreatedCommentTemplate = launchArgs[i + 1];
         }
+        else if (launchArgs[i] == '--use_comment_for_issue_matching') {
+            useCommentForIssueMatching = launchArgs[i + 1].toLowerCase() == 'true';
+        }
     }
 }
 const gitHubSource = new github_1.GitHub(new octokit_1.Octokit({ auth: githubTokenSource }), ownerSource, repoSource);
@@ -44303,11 +44308,13 @@ switch (process.env.GITHUB_EVENT_NAME) {
             break;
         const sourceComment = payload.comment;
         const issueCommentBody = utils.getIssueCommentTargetBody(sourceComment);
-        if (utils.getIssueCreatedCommentTemplate(gitHubTarget, issueCommentBody).includes(issueCreatedCommentTemplate)) {
+        if (utils.isIssueCreatedComment(gitHubTarget, issueCommentBody)) {
             console.log('Skipping the service comment sync');
             break;
         }
-        gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
+        utils
+            .getIssueNumber(gitHubSource, gitHubTarget, useCommentForIssueMatching, number, issue.title)
+            .then(targetIssueNumber => {
             console.log(`target_issue_id:${targetIssueNumber}`);
             core.setOutput('issue_id_target', targetIssueNumber);
             if (action == 'created') {
@@ -44354,7 +44361,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
                     console.log(`target_issue_id:${response.data.id}`);
                     core.setOutput('issue_id_target', response.data.id);
                     gitHubSource.reactOnIssue(number, 'rocket');
-                    if (issueCreatedCommentTemplate) {
+                    if (utils.issueCreatedCommentTemplate.trim()) {
                         gitHubSource.createComment(number, utils.getIssueCreatedComment(gitHubTarget, response.data.number));
                     }
                 })
@@ -44369,15 +44376,14 @@ switch (process.env.GITHUB_EVENT_NAME) {
             case 'reopened':
             case 'labeled':
             case 'unlabeled':
-                gitHubTarget
-                    .getIssueNumberByTitle(issue.title)
+                utils
+                    .getIssueNumber(gitHubSource, gitHubTarget, useCommentForIssueMatching, number, issue.title)
                     .then(targetIssueNumber => {
                     if (targetIssueNumber) {
                         // set target issue id for GH output
                         console.log(`target_issue_id:${targetIssueNumber}`);
                         core.setOutput('issue_id_target', targetIssueNumber);
                         // Update issue in target repo
-                        // Update issue in target repo, identify target repo issue number by title match
                         gitHubTarget
                             .editIssue(targetIssueNumber, issue.title, issueBody, issue.state, issue.state_reason, labels)
                             .then(response => {
@@ -44399,7 +44405,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
                                 core.setOutput('issue_id_target', response.data.number);
                                 console.log('Created issue for lack of a match:', response.data.title);
                                 gitHubSource.reactOnIssue(number, 'rocket');
-                                if (issueCreatedCommentTemplate) {
+                                if (utils.issueCreatedCommentTemplate.trim()) {
                                     gitHubSource.createComment(number, utils.getIssueCreatedComment(gitHubTarget, response.data.number));
                                 }
                             })
@@ -44526,12 +44532,39 @@ class Utils {
     getIssueCreatedComment(gitHub, issueId) {
         return this.issueCreatedCommentTemplate.replace('{{<link>}}', `https://github.com/${gitHub.owner}/${gitHub.repo}/issues/${issueId}`);
     }
+    isIssueCreatedComment(gitHub, body) {
+        return this.getIssueCreatedCommentTemplate(gitHub, body).includes(this.issueCreatedCommentTemplate);
+    }
     getIssueCreatedCommentTemplate(gitHub, body) {
         // replaces a link to the target issue with {{<link>}} placeholder for
         // message matching (template unrender)
         const baseLinkTemplate = `https://github.com/${gitHub.owner}/${gitHub.repo}/issues/`;
         const regex = new RegExp(baseLinkTemplate.replace('/', '\\/') + '\\d+');
         return body.replace(regex, '{{<link>}}');
+    }
+    getIssueNumberFromCreatedComment(gitHub, body) {
+        const regex = new RegExp(`https://github.com/${gitHub.owner}/${gitHub.repo}/issues/(\\d+)`.replace('/', '\\/'));
+        const match = body.match(regex);
+        if (match && match[1]) {
+            return Number(match[1]);
+        }
+        return null;
+    }
+    getTargetIssueNumberFromSourceComments(targetGitHub, sourceComments) {
+        if (!this.issueCreatedCommentTemplate.trim()) {
+            return null;
+        }
+        for (let i = 0; i < sourceComments.length; i++) {
+            const renderedBody = sourceComments[i].body;
+            if (this.isIssueCreatedComment(targetGitHub, renderedBody)) {
+                // it's a created issue comment from the bot
+                const parseIssueNumber = this.getIssueNumberFromCreatedComment(targetGitHub, renderedBody);
+                if (parseIssueNumber) {
+                    return parseIssueNumber;
+                }
+            }
+        }
+        return null;
     }
     getIssueCommentBodyFiltered(issueComment) {
         for (let i = 0; i < this.skipCommentSyncKeywords.length; i++) {
@@ -44553,6 +44586,20 @@ class Utils {
         const footer = this.getIssueFooter(issue);
         const body = issue.body || '';
         return footer ? body + '\n\n' + footer : body;
+    }
+    getIssueNumber(gitHubSource, gitHubTarget, useCommentForIssueMatching, sourceIssueNumber, sourceIssueTitle) {
+        if (useCommentForIssueMatching) {
+            return gitHubSource.getComments(sourceIssueNumber).then(sourceComments => {
+                const issueNumber = this.getTargetIssueNumberFromSourceComments(gitHubTarget, sourceComments);
+                if (!issueNumber) {
+                    return gitHubTarget.getIssueNumberByTitle(sourceIssueTitle);
+                }
+                return Promise.resolve(issueNumber);
+            });
+        }
+        else {
+            return gitHubTarget.getIssueNumberByTitle(sourceIssueTitle);
+        }
     }
 }
 exports.Utils = Utils;

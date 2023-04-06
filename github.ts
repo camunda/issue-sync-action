@@ -187,7 +187,7 @@ export class GitHub {
             })
     }
 
-    public getIssueNumberByTitle(issueTitle: string): Promise<number> {
+    public getIssueNumberByTitle(issueTitle: string): Promise<number | null> {
         // Find issue number from target repo where the issue title matches the title of the issue in the source repo
         // Sort by created and order by ascending to select the oldest created issue of that title
         // Octokit automatically encoded the query

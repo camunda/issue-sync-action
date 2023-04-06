@@ -39,7 +39,7 @@ export class Utils {
         return result
     }
 
-    public getIssueCommentFooter(issueComment: IssueComment): string {
+    private getIssueCommentFooter(issueComment: IssueComment): string {
         return this.targetCommentFooterTemplate
             .replace('{{<link>}}', issueComment.html_url)
             .replace('{{<author>}}', `@${issueComment.user.login}`)
@@ -52,12 +52,46 @@ export class Utils {
         )
     }
 
-    public getIssueCreatedCommentTemplate(gitHub: GitHub, body: string): string {
+    public isIssueCreatedComment(gitHub: GitHub, body: string): boolean {
+        return this.getIssueCreatedCommentTemplate(gitHub, body).includes(this.issueCreatedCommentTemplate)
+    }
+
+    private getIssueCreatedCommentTemplate(gitHub: GitHub, body: string): string {
         // replaces a link to the target issue with {{<link>}} placeholder for
         // message matching (template unrender)
         const baseLinkTemplate = `https://github.com/${gitHub.owner}/${gitHub.repo}/issues/`
         const regex = new RegExp(baseLinkTemplate.replace('/', '\\/') + '\\d+')
         return body.replace(regex, '{{<link>}}')
+    }
+
+    private getIssueNumberFromCreatedComment(gitHub: GitHub, body: string): number | null {
+        const regex = new RegExp(`https://github.com/${gitHub.owner}/${gitHub.repo}/issues/(\\d+)`.replace('/', '\\/'))
+        const match = body.match(regex)
+        if (match && match[1]) {
+            return Number(match[1])
+        }
+        return null
+    }
+
+    private getTargetIssueNumberFromSourceComments(
+        targetGitHub: GitHub,
+        sourceComments: IssueComment[]
+    ): number | null {
+        if (!this.issueCreatedCommentTemplate.trim()) {
+            return null
+        }
+
+        for (let i = 0; i < sourceComments.length; i++) {
+            const renderedBody = sourceComments[i].body
+            if (this.isIssueCreatedComment(targetGitHub, renderedBody)) {
+                // it's a created issue comment from the bot
+                const parseIssueNumber = this.getIssueNumberFromCreatedComment(targetGitHub, renderedBody)
+                if (parseIssueNumber) {
+                    return parseIssueNumber
+                }
+            }
+        }
+        return null
     }
 
     private getIssueCommentBodyFiltered(issueComment: IssueComment): string {
@@ -83,5 +117,25 @@ export class Utils {
         const footer = this.getIssueFooter(issue)
         const body = issue.body || ''
         return footer ? body + '\n\n' + footer : body
+    }
+
+    public getIssueNumber(
+        gitHubSource: GitHub,
+        gitHubTarget: GitHub,
+        useCommentForIssueMatching: boolean,
+        sourceIssueNumber: number,
+        sourceIssueTitle: string
+    ): Promise<number | null> {
+        if (useCommentForIssueMatching) {
+            return gitHubSource.getComments(sourceIssueNumber).then(sourceComments => {
+                const issueNumber = this.getTargetIssueNumberFromSourceComments(gitHubTarget, sourceComments)
+                if (!issueNumber) {
+                    return gitHubTarget.getIssueNumberByTitle(sourceIssueTitle)
+                }
+                return Promise.resolve(issueNumber)
+            })
+        } else {
+            return gitHubTarget.getIssueNumberByTitle(sourceIssueTitle)
+        }
     }
 }
