@@ -44105,6 +44105,28 @@ class GitHub {
             return comments;
         });
     }
+    getIssueNumber(useLabelSearch, trackingLabel, issueTitle) {
+        if (useLabelSearch) {
+            return this.getIssueNumberByTrackingLabel(trackingLabel);
+        }
+        else {
+            return this.getIssueNumberByTitle(issueTitle);
+        }
+    }
+    getIssueNumberByTrackingLabel(trackingLabel) {
+        return this.octokit
+            .request('GET /search/issues', {
+            q: `repo:${this.owner}/${this.repo}+type:issue+label:${trackingLabel}`,
+            sort: 'created',
+            order: 'asc',
+            per_page: 10,
+        })
+            .then(response => {
+            console.log(`Found a total of ${response.data.total_count} issues that fit the query.`);
+            const targetIssue = response.data.items.find(targetIssue => targetIssue.labels.filter(l => l.name === trackingLabel).length > 0);
+            return (targetIssue || {}).number;
+        });
+    }
     getIssueNumberByTitle(issueTitle) {
         // Find issue number from target repo where the issue title matches the title of the issue in the source repo
         // Sort by created and order by ascending to select the oldest created issue of that title
@@ -44177,6 +44199,7 @@ let syncRepoLabels;
 let targetIssueFooterTemplate = '';
 let targetCommentFooterTemplate = '';
 let issueCreatedCommentTemplate = '';
+let useLabelForIssueMatching = false;
 let ONLY_SYNC_ON_LABEL;
 let CREATE_ISSUES_ON_EDIT;
 let ONLY_SYNC_MAIN_ISSUE;
@@ -44209,6 +44232,7 @@ if (process.env.CI == 'true') {
         .filter(x => x);
     skippedCommentMessage = core.getInput('skipped_comment_message');
     issueCreatedCommentTemplate = core.getInput('issue_created_comment_template');
+    useLabelForIssueMatching = core.getBooleanInput('use_label_for_issue_matching');
     ONLY_SYNC_ON_LABEL = core.getInput('only_sync_on_label');
     CREATE_ISSUES_ON_EDIT = core.getBooleanInput('create_issues_on_edit');
     ONLY_SYNC_MAIN_ISSUE = core.getBooleanInput('only_sync_main_issue');
@@ -44275,6 +44299,9 @@ else {
         else if (launchArgs[i] == '--issue_created_comment_template') {
             issueCreatedCommentTemplate = launchArgs[i + 1];
         }
+        else if (launchArgs[i] == '--use_label_for_issue_matching') {
+            useLabelForIssueMatching = launchArgs[i + 1].toLowerCase() == 'true';
+        }
     }
 }
 const gitHubSource = new github_1.GitHub(new octokit_1.Octokit({ auth: githubTokenSource }), ownerSource, repoSource);
@@ -44291,7 +44318,11 @@ const payload = require(process.env.GITHUB_EVENT_PATH);
 const number = (payload.issue || payload.pull_request || payload).number;
 const action = payload.action;
 const issue = payload.issue;
+const trackingLabel = `source:${gitHubSource.owner}/${gitHubSource.repo}/issues/${number}`;
 const labels = [...new Set(issue.labels.map(label => label.name).concat(additionalIssueLabels))];
+if (useLabelForIssueMatching) {
+    labels.push(trackingLabel);
+}
 // If flag for only syncing labelled issues is set, check if issue has label of specified sync type
 const skipSync = ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL);
 console.log(`Found issue ${number}: ${issue.title}`);
@@ -44307,7 +44338,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
             console.log('Skipping the service comment sync');
             break;
         }
-        gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
+        gitHubTarget.getIssueNumber(useLabelForIssueMatching, trackingLabel, issue.title).then(targetIssueNumber => {
             console.log(`target_issue_id:${targetIssueNumber}`);
             core.setOutput('issue_id_target', targetIssueNumber);
             if (action == 'created') {
@@ -44370,7 +44401,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
             case 'labeled':
             case 'unlabeled':
                 gitHubTarget
-                    .getIssueNumberByTitle(issue.title)
+                    .getIssueNumber(useLabelForIssueMatching, trackingLabel, issue.title)
                     .then(targetIssueNumber => {
                     if (targetIssueNumber) {
                         // set target issue id for GH output

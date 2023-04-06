@@ -187,7 +187,32 @@ export class GitHub {
             })
     }
 
-    public getIssueNumberByTitle(issueTitle: string): Promise<number> {
+    public getIssueNumber(useLabelSearch: boolean, trackingLabel: string, issueTitle: string): Promise<any> {
+        if (useLabelSearch) {
+            return this.getIssueNumberByTrackingLabel(trackingLabel)
+        } else {
+            return this.getIssueNumberByTitle(issueTitle)
+        }
+    }
+
+    private getIssueNumberByTrackingLabel(trackingLabel: string): Promise<any> {
+        return this.octokit
+            .request('GET /search/issues', {
+                q: `repo:${this.owner}/${this.repo}+type:issue+label:${trackingLabel}`,
+                sort: 'created',
+                order: 'asc',
+                per_page: 10,
+            })
+            .then(response => {
+                console.log(`Found a total of ${response.data.total_count} issues that fit the query.`)
+                const targetIssue = response.data.items.find(
+                    targetIssue => targetIssue.labels.filter(l => l.name === trackingLabel).length > 0
+                )
+                return (targetIssue || {}).number
+            })
+    }
+
+    private getIssueNumberByTitle(issueTitle: string): Promise<number> {
         // Find issue number from target repo where the issue title matches the title of the issue in the source repo
         // Sort by created and order by ascending to select the oldest created issue of that title
         // Octokit automatically encoded the query

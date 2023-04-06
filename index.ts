@@ -20,6 +20,7 @@ let syncRepoLabels: boolean
 let targetIssueFooterTemplate = ''
 let targetCommentFooterTemplate = ''
 let issueCreatedCommentTemplate = ''
+let useLabelForIssueMatching: boolean = false
 let ONLY_SYNC_ON_LABEL: string
 let CREATE_ISSUES_ON_EDIT: boolean
 let ONLY_SYNC_MAIN_ISSUE: boolean
@@ -54,7 +55,9 @@ if (process.env.CI == 'true') {
         .filter(x => x)
     skippedCommentMessage = core.getInput('skipped_comment_message')
     issueCreatedCommentTemplate = core.getInput('issue_created_comment_template')
+    useLabelForIssueMatching = core.getBooleanInput('use_label_for_issue_matching')
     ONLY_SYNC_ON_LABEL = core.getInput('only_sync_on_label')
+
     CREATE_ISSUES_ON_EDIT = core.getBooleanInput('create_issues_on_edit')
     ONLY_SYNC_MAIN_ISSUE = core.getBooleanInput('only_sync_main_issue')
 
@@ -106,6 +109,8 @@ if (process.env.CI == 'true') {
             skippedCommentMessage = launchArgs[i + 1]
         } else if (launchArgs[i] == '--issue_created_comment_template') {
             issueCreatedCommentTemplate = launchArgs[i + 1]
+        } else if (launchArgs[i] == '--use_label_for_issue_matching') {
+            useLabelForIssueMatching = launchArgs[i + 1].toLowerCase() == 'true'
         }
     }
 }
@@ -138,7 +143,13 @@ const number = (payload.issue || payload.pull_request || payload).number
 const action: string = payload.action
 const issue: Issue = payload.issue
 
+const trackingLabel = `source:${gitHubSource.owner}/${gitHubSource.repo}/issues/${number}`
 const labels: string[] = [...new Set(issue.labels.map(label => label.name).concat(additionalIssueLabels))]
+
+if (useLabelForIssueMatching) {
+    labels.push(trackingLabel)
+}
+
 // If flag for only syncing labelled issues is set, check if issue has label of specified sync type
 const skipSync = ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL)
 
@@ -160,7 +171,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
             break
         }
 
-        gitHubTarget.getIssueNumberByTitle(issue.title).then(targetIssueNumber => {
+        gitHubTarget.getIssueNumber(useLabelForIssueMatching, trackingLabel, issue.title).then(targetIssueNumber => {
             console.log(`target_issue_id:${targetIssueNumber}`)
             core.setOutput('issue_id_target', targetIssueNumber)
 
@@ -225,7 +236,7 @@ switch (process.env.GITHUB_EVENT_NAME) {
             case 'labeled':
             case 'unlabeled':
                 gitHubTarget
-                    .getIssueNumberByTitle(issue.title)
+                    .getIssueNumber(useLabelForIssueMatching, trackingLabel, issue.title)
                     .then(targetIssueNumber => {
                         if (targetIssueNumber) {
                             // set target issue id for GH output
