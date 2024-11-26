@@ -49,7 +49,7 @@ export class LabelSyncer {
                             .then(results => {
                                 results.forEach(element => console.log(element))
                             })
-                            .then(() => {
+                            .then((): null => {
                                 console.log('Done')
                                 return null
                             })
