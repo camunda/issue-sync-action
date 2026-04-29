@@ -92,7 +92,7 @@ jobs:
           additional_issue_labels: "integration-test-synced"
           use_comment_for_issue_matching: "true"
           target_issue_assignees_behavior: "add_static"
-          target_issue_assignees_static: "github-actions[bot]"
+          target_issue_assignees_static: ""
 
       # Step 4: Verify the synced issue was created and has correct assignees
       - name: Verify synced issue
