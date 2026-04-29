@@ -20,6 +20,7 @@ REPO="${REPO:-camunda/issue-sync-action}"
 SKIP_CLEANUP="${SKIP_CLEANUP:-}"
 SOURCE_ISSUE=""
 TARGET_ISSUE=""
+EVENT_FILE=""
 
 cleanup() {
     if [[ -n "$SKIP_CLEANUP" ]]; then
