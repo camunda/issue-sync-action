@@ -12,6 +12,7 @@ export class Issue {
 
 export class User {
     login: string
+    type?: string
 }
 
 export class IssueComment {
