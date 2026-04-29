@@ -1,0 +1,162 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx jest --ci --coverage
+
+  integration-test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Step 1: Create a source issue with a bot-like assignee scenario via the API
+      - name: Create test issue
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `[integration-test] ${context.runId}-${context.runNumber}`
+            const body = 'Automated integration test issue. Will be cleaned up automatically.'
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['integration-test'],
+            })
+            core.setOutput('issue_number', issue.data.number)
+            core.setOutput('issue_title', title)
+            console.log(`Created source issue #${issue.data.number}`)
+
+      # Step 2: Create the event payload file that the action reads
+      - name: Prepare event payload
+        id: prepare_payload
+        uses: actions/github-script@v7
+        env:
+          SOURCE_ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+        with:
+          script: |
+            const issueNumber = parseInt(process.env.SOURCE_ISSUE_NUMBER)
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+            })
+
+            // Inject a fake Bot assignee to simulate the Copilot scenario
+            issue.assignees.push({
+              login: 'github-actions[bot]',
+              type: 'Bot',
+            })
+
+            const payload = {
+              action: 'labeled',
+              issue: issue,
+            }
+            const fs = require('fs')
+            const path = '/tmp/test-event.json'
+            fs.writeFileSync(path, JSON.stringify(payload, null, 2))
+            core.exportVariable('GITHUB_EVENT_PATH', path)
+            core.exportVariable('GITHUB_EVENT_NAME', 'issues')
+            console.log(`Payload written with ${issue.assignees.length} assignees (including fake bot)`)
+
+      # Step 3: Run the action (syncs to the same repo)
+      - name: Run issue-sync-action
+        id: sync
+        uses: ./
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_EVENT_PATH: /tmp/test-event.json
+          GITHUB_EVENT_NAME: issues
+        with:
+          repo_target: ${{ github.repository }}
+          only_sync_on_label: "integration-test"
+          only_sync_main_issue: "true"
+          additional_issue_labels: "integration-test-synced"
+          use_comment_for_issue_matching: "true"
+          target_issue_assignees_behavior: "add_static"
+          target_issue_assignees_static: "github-actions[bot]"
+
+      # Step 4: Verify the synced issue was created and has correct assignees
+      - name: Verify synced issue
+        uses: actions/github-script@v7
+        env:
+          TARGET_ISSUE_ID: ${{ steps.sync.outputs.issue_id_target }}
+          SOURCE_ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+        with:
+          script: |
+            const targetIssueNumber = parseInt(process.env.TARGET_ISSUE_ID)
+            if (!targetIssueNumber) {
+              core.setFailed('No target issue was created by the sync action')
+              return
+            }
+            console.log(`Verifying target issue #${targetIssueNumber}`)
+
+            const { data: targetIssue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: targetIssueNumber,
+            })
+
+            // Verify labels
+            const labels = targetIssue.labels.map(l => l.name)
+            if (!labels.includes('integration-test-synced')) {
+              core.setFailed(`Expected label 'integration-test-synced', got: ${labels}`)
+              return
+            }
+
+            // Verify no bot assignees leaked through
+            const assigneeLogins = targetIssue.assignees.map(a => a.login)
+            const botAssignees = targetIssue.assignees.filter(a => a.type === 'Bot')
+            if (botAssignees.length > 0) {
+              core.setFailed(`Bot assignees should have been filtered out, but found: ${botAssignees.map(a => a.login)}`)
+              return
+            }
+
+            console.log(`Target issue #${targetIssueNumber} verified successfully`)
+            console.log(`  Labels: ${labels}`)
+            console.log(`  Assignees: ${assigneeLogins}`)
+
+      # Step 5: Clean up - close both issues
+      - name: Cleanup test issues
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SOURCE_ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+          TARGET_ISSUE_ID: ${{ steps.sync.outputs.issue_id_target }}
+        with:
+          script: |
+            const sourceNumber = parseInt(process.env.SOURCE_ISSUE_NUMBER)
+            const targetNumber = parseInt(process.env.TARGET_ISSUE_ID)
+
+            for (const num of [sourceNumber, targetNumber].filter(Boolean)) {
+              try {
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: num,
+                  state: 'closed',
+                  state_reason: 'not_planned',
+                })
+                console.log(`Closed issue #${num}`)
+              } catch (e) {
+                console.warn(`Failed to close issue #${num}: ${e.message}`)
+              }
+            }

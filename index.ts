@@ -5,14 +5,7 @@ import { Issue, IssueComment } from './issue'
 import { GitHub } from './github'
 import { LabelSyncer } from './labelSyncer'
 import { Utils } from './utils'
-
-enum TargetIssueAssigneesBehavior {
-    SkipSync = 'skip_sync',
-    AddSourceAuthor = 'add_source_author',
-    AssignSourceAuthor = 'assign_source_author',
-    AddStatic = 'add_static',
-    AssignStatic = 'assign_static',
-}
+import { TargetIssueAssigneesBehavior, filterHumanAssignees, resolveTargetAssignees } from './assignees'
 
 let ownerSource = ''
 let repoSource = ''
@@ -171,30 +164,15 @@ const labels: string[] = [...new Set(issue.labels.map(label => label.name).conca
 // If flag for only syncing labelled issues is set, check if issue has label of specified sync type
 const skipSync = ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL)
 const sourceIssueAuthor: string = issue.user?.login
-const sourceIssueAssignees: string[] = issue.assignees.map(x => x.login)
-let targetIssueAssignees: string[] = undefined // if a parameter is undefined, octokit will not use it for API calls when it's passed into a function
+const sourceIssueAssignees: string[] = filterHumanAssignees(issue.assignees)
+let targetIssueAssignees: string[] = resolveTargetAssignees(
+    targetIssueAssigneesBehavior,
+    sourceIssueAssignees,
+    sourceIssueAuthor,
+    targetIssueAssigneesStatic
+)
 
 console.log(`Found issue ${number}: ${issue.title}`)
-console.log(`Labels: ${labels}`)
-
-switch (targetIssueAssigneesBehavior) {
-    case TargetIssueAssigneesBehavior.AddSourceAuthor:
-        targetIssueAssignees = sourceIssueAssignees.concat([sourceIssueAuthor])
-        break
-    case TargetIssueAssigneesBehavior.AssignSourceAuthor:
-        targetIssueAssignees = [sourceIssueAuthor]
-        break
-    case TargetIssueAssigneesBehavior.AddStatic:
-        targetIssueAssignees = sourceIssueAssignees.concat(targetIssueAssigneesStatic)
-        break
-    case TargetIssueAssigneesBehavior.AssignStatic:
-        targetIssueAssignees = targetIssueAssigneesStatic
-        break
-}
-
-if (targetIssueAssignees) {
-    targetIssueAssignees = [...new Set(targetIssueAssignees.filter(x => x))]
-}
 
 switch (process.env.GITHUB_EVENT_NAME) {
     case 'issue_comment':
