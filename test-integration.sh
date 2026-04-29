@@ -44,13 +44,10 @@ trap cleanup EXIT
 
 echo "=== Step 1: Create test issue ==="
 
-# Detect if we can assign the current user (CI tokens authenticate as a bot, which can't be assigned)
-CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null || echo "")
-CURRENT_USER_TYPE=$(gh api user --jq '.type' 2>/dev/null || echo "")
-EXPECT_HUMAN_ASSIGNEE=true
-
-if [[ -z "$CURRENT_USER" ]] || [[ "$CURRENT_USER_TYPE" == "Bot" ]] || [[ "$CURRENT_USER" == *"[bot]"* ]]; then
-    echo "Running in CI context (authenticated as ${CURRENT_USER:-unknown}) — cannot assign human user"
+# In GitHub Actions, GITHUB_ACTIONS=true and the token can't call GET /user or assign bots.
+# Locally, gh authenticates as a real user who can be assigned.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo "Running in GitHub Actions CI — creating issue without human assignee"
     EXPECT_HUMAN_ASSIGNEE=false
     SOURCE_ISSUE=$(gh issue create \
         --repo "$REPO" \
@@ -58,8 +55,10 @@ if [[ -z "$CURRENT_USER" ]] || [[ "$CURRENT_USER_TYPE" == "Bot" ]] || [[ "$CURRE
         --body "Automated CI integration test. Will be cleaned up." \
         --label "integration-test" \
         | grep -oP '\d+$')
-    echo "Created source issue #${SOURCE_ISSUE} (no assignee — CI mode)"
+    echo "Created source issue #${SOURCE_ISSUE} (CI mode — no assignee)"
 else
+    CURRENT_USER=$(gh api user --jq '.login')
+    EXPECT_HUMAN_ASSIGNEE=true
     SOURCE_ISSUE=$(gh issue create \
         --repo "$REPO" \
         --title "[integration-test] local-$(date +%s)" \
