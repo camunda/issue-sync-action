@@ -171,7 +171,7 @@ const labels: string[] = [...new Set(issue.labels.map(label => label.name).conca
 // If flag for only syncing labelled issues is set, check if issue has label of specified sync type
 const skipSync = ONLY_SYNC_ON_LABEL && !issue.labels.find(label => label.name === ONLY_SYNC_ON_LABEL)
 const sourceIssueAuthor: string = issue.user?.login
-const sourceIssueAssignees: string[] = issue.assignees.map(x => x.login)
+const sourceIssueAssignees: string[] = issue.assignees.filter(x => x.type !== 'Bot').map(x => x.login)
 let targetIssueAssignees: string[] = undefined // if a parameter is undefined, octokit will not use it for API calls when it's passed into a function
 
 console.log(`Found issue ${number}: ${issue.title}`)
