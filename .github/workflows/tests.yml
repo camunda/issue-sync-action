@@ -45,37 +45,22 @@ jobs:
             core.setOutput('issue_title', title)
             console.log(`Created source issue #${issue.data.number}`)
 
-      # Step 2: Create the event payload file that the action reads
+      # Step 2: Build event payload and overwrite the runner's event file
       - name: Prepare event payload
-        id: prepare_payload
-        uses: actions/github-script@v7
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
-        with:
-          script: |
-            const issueNumber = parseInt(process.env.SOURCE_ISSUE_NUMBER)
-            const { data: issue } = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-            })
+        run: |
+          # Fetch the issue via API and inject a fake Bot assignee
+          gh api "repos/${{ github.repository }}/issues/${SOURCE_ISSUE_NUMBER}" | \
+            jq '{action: "labeled", issue: (. + {assignees: (.assignees + [{login: "github-actions[bot]", type: "Bot"}])})}' \
+            > "$GITHUB_EVENT_PATH"
 
-            // Inject a fake Bot assignee to simulate the Copilot scenario
-            issue.assignees.push({
-              login: 'github-actions[bot]',
-              type: 'Bot',
-            })
+          echo "GITHUB_EVENT_NAME=issues" >> "$GITHUB_ENV"
 
-            const payload = {
-              action: 'labeled',
-              issue: issue,
-            }
-            const fs = require('fs')
-            // Overwrite the existing event file — GITHUB_EVENT_PATH cannot be
-            // overridden via step env for JavaScript actions.
-            const eventPath = process.env.GITHUB_EVENT_PATH
-            fs.writeFileSync(eventPath, JSON.stringify(payload, null, 2))
-            console.log(`Overwrote ${eventPath} with ${issue.assignees.length} assignees (including fake bot)`)
+          echo "=== Event payload assignees ==="
+          jq '.issue.assignees[] | {login, type}' "$GITHUB_EVENT_PATH"
+          echo "=== Event file path: $GITHUB_EVENT_PATH ==="
 
       # Step 3: Run the action (syncs to the same repo)
       - name: Run issue-sync-action
@@ -83,7 +68,6 @@ jobs:
         uses: ./
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_EVENT_NAME: issues
         with:
           repo_target: ${{ github.repository }}
           only_sync_on_label: "integration-test"
