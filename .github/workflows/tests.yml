@@ -71,11 +71,11 @@ jobs:
               issue: issue,
             }
             const fs = require('fs')
-            const path = '/tmp/test-event.json'
-            fs.writeFileSync(path, JSON.stringify(payload, null, 2))
-            core.exportVariable('GITHUB_EVENT_PATH', path)
-            core.exportVariable('GITHUB_EVENT_NAME', 'issues')
-            console.log(`Payload written with ${issue.assignees.length} assignees (including fake bot)`)
+            // Overwrite the existing event file — GITHUB_EVENT_PATH cannot be
+            // overridden via step env for JavaScript actions.
+            const eventPath = process.env.GITHUB_EVENT_PATH
+            fs.writeFileSync(eventPath, JSON.stringify(payload, null, 2))
+            console.log(`Overwrote ${eventPath} with ${issue.assignees.length} assignees (including fake bot)`)
 
       # Step 3: Run the action (syncs to the same repo)
       - name: Run issue-sync-action
@@ -83,7 +83,6 @@ jobs:
         uses: ./
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_EVENT_PATH: /tmp/test-event.json
           GITHUB_EVENT_NAME: issues
         with:
           repo_target: ${{ github.repository }}
