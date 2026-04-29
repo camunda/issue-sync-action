@@ -42,15 +42,32 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=== Step 1: Create test issue ==="
-CURRENT_USER=$(gh api user --jq '.login')
-SOURCE_ISSUE=$(gh issue create \
-    --repo "$REPO" \
-    --title "[integration-test] local-$(date +%s)" \
-    --body "Automated local integration test. Will be cleaned up." \
-    --label "integration-test" \
-    --assignee "$CURRENT_USER" \
-    | grep -oP '\d+$')
-echo "Created source issue #${SOURCE_ISSUE} (assigned to ${CURRENT_USER})"
+
+# Detect if we can assign the current user (CI tokens authenticate as a bot, which can't be assigned)
+CURRENT_USER=$(gh api user --jq '.login' 2>/dev/null || echo "")
+CURRENT_USER_TYPE=$(gh api user --jq '.type' 2>/dev/null || echo "")
+EXPECT_HUMAN_ASSIGNEE=true
+
+if [[ -z "$CURRENT_USER" ]] || [[ "$CURRENT_USER_TYPE" == "Bot" ]] || [[ "$CURRENT_USER" == *"[bot]"* ]]; then
+    echo "Running in CI context (authenticated as ${CURRENT_USER:-unknown}) — cannot assign human user"
+    EXPECT_HUMAN_ASSIGNEE=false
+    SOURCE_ISSUE=$(gh issue create \
+        --repo "$REPO" \
+        --title "[integration-test] ci-$(date +%s)" \
+        --body "Automated CI integration test. Will be cleaned up." \
+        --label "integration-test" \
+        | grep -oP '\d+$')
+    echo "Created source issue #${SOURCE_ISSUE} (no assignee — CI mode)"
+else
+    SOURCE_ISSUE=$(gh issue create \
+        --repo "$REPO" \
+        --title "[integration-test] local-$(date +%s)" \
+        --body "Automated local integration test. Will be cleaned up." \
+        --label "integration-test" \
+        --assignee "$CURRENT_USER" \
+        | grep -oP '\d+$')
+    echo "Created source issue #${SOURCE_ISSUE} (assigned to ${CURRENT_USER})"
+fi
 
 echo ""
 echo "=== Step 2: Build event payload ==="
@@ -69,12 +86,14 @@ echo "Event file: $EVENT_FILE"
 echo "Assignees in payload:"
 jq -r '.issue.assignees[] | "  \(.login) (type: \(.type // "null"))"' "$EVENT_FILE"
 
-# Sanity check: verify the source issue actually has the human assignee on GitHub
-SOURCE_ASSIGNEES=$(gh api "repos/${REPO}/issues/${SOURCE_ISSUE}" --jq '[.assignees[].login] | join(", ")')
-echo "Actual assignees on source issue #${SOURCE_ISSUE}: ${SOURCE_ASSIGNEES}"
-if [[ -z "$SOURCE_ASSIGNEES" ]]; then
-    echo "FAIL: Source issue has no assignees — test setup is broken"
-    exit 1
+# Sanity check: verify the source issue actually has the human assignee on GitHub (local mode only)
+if [[ "$EXPECT_HUMAN_ASSIGNEE" == "true" ]]; then
+    SOURCE_ASSIGNEES=$(gh api "repos/${REPO}/issues/${SOURCE_ISSUE}" --jq '[.assignees[].login] | join(", ")')
+    echo "Actual assignees on source issue #${SOURCE_ISSUE}: ${SOURCE_ASSIGNEES}"
+    if [[ -z "$SOURCE_ASSIGNEES" ]]; then
+        echo "FAIL: Source issue has no assignees — test setup is broken"
+        exit 1
+    fi
 fi
 
 echo ""
@@ -126,7 +145,7 @@ if [[ "$BOT_ASSIGNEES" -gt 0 ]]; then
     exit 1
 fi
 
-if [[ "$HUMAN_ASSIGNEES" -eq 0 ]]; then
+if [[ "$EXPECT_HUMAN_ASSIGNEE" == "true" ]] && [[ "$HUMAN_ASSIGNEES" -eq 0 ]]; then
     echo "FAIL: No human assignees on the target issue — expected the source user to be kept!"
     exit 1
 fi

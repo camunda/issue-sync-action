@@ -3,6 +3,7 @@
 ## General Principles
 
 Always test changes before committing:
+
 - **Unit tests** run on every commit — fast, isolated, no network required
 - **Integration tests** run before pushing sync logic changes — real GitHub API calls
 - **CI** runs both layers on every push and PR
@@ -75,6 +76,7 @@ SKIP_CLEANUP=1 ./test-integration.sh               # Keep test issues open for d
 ### Running in CI
 
 Integration tests also run in `.github/workflows/tests.yml` on every push/PR. The CI workflow:
+
 - Creates a test issue via `actions/github-script`
 - Overwrites `$GITHUB_EVENT_PATH` in a `run:` step to inject the test payload
 - Runs the action via `uses: ./`

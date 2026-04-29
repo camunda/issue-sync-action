@@ -117,6 +117,7 @@ git commit                  # Conventional commit message
 ### Testing
 
 See `TESTING.md` for the full testing guide. Summary:
+
 - **Unit tests:** `npx jest` — isolated tests for pure business logic modules. Run before every commit.
 - **Integration tests:** `./test-integration.sh` — end-to-end test with real GitHub API. Run before pushing sync logic changes.
 - **CI:** `.github/workflows/tests.yml` — runs both unit and integration tests on push/PR.
