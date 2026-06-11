@@ -60,18 +60,26 @@ SKIP_CLEANUP=1 ./test-integration.sh               # Keep test issues open for d
 
 #### What the Script Does
 
-1. **Creates a real issue** on GitHub with a real human assignee (the authenticated user) and the `integration-test` label
-2. **Fetches the real issue JSON** from the GitHub API (real assignee data, real labels)
-3. **Appends a fake Bot assignee** to the payload — this is the one unavoidable fake, because GitHub's API rejects assigning bots to issues (which is exactly the bug this test validates)
+0. **Sweeps leftover issues** — closes any open issue carrying the `integration-test` / `integration-test-synced` label or the `[integration-test]` title prefix, clearing the backlog from earlier failed runs (skipped when `SKIP_CLEANUP=1`)
+1. **Picks an assignable human** — prefers `GITHUB_ACTOR`, but only if it is a real, assignable user; otherwise falls back to the first assignable user on the repo. This avoids assigning bots (e.g. `renovate[bot]` on dependency PRs), which the installation `GITHUB_TOKEN` cannot assign
+2. **Creates a real issue** with the `integration-test` label (number captured first), then assigns the human in a separate, best-effort step
+3. **Builds a synthetic event payload** by injecting both the chosen human assignee (`type: User`) and a fake Bot assignee (`type: Bot`) — the action reads assignees from the payload (`GITHUB_EVENT_PATH`), so this decouples the test from GitHub-side assignment
 4. **Runs `node dist/index.js`** with `CI=true` and all `INPUT_*` env vars set, simulating the GitHub Actions runtime
 5. **Verifies the real target issue** on GitHub: human assignee preserved, bot assignee filtered out, correct labels applied
-6. **Cleans up** both issues (unless `SKIP_CLEANUP=1`)
+6. **Cleans up** by sweeping every integration-test issue (source, synced target, and any leak), unless `SKIP_CLEANUP=1`
 
 #### Debugging Failures
 
-- Use `SKIP_CLEANUP=1` to keep test issues open for inspection
+- Use `SKIP_CLEANUP=1` to keep test issues open for inspection (also disables the start-of-run sweep)
 - Check the script output for the source/target issue URLs
 - Verify real state with: `gh api repos/OWNER/REPO/issues/NUMBER --jq '{title, assignees: [.assignees[] | {login, type}]}'`
+
+> **Why it failed in CI (May 2026):** Dependency PRs run as `renovate[bot]`, and the
+> script assigned `GITHUB_ACTOR` directly. GitHub's `replaceActorsForAssignable`
+> mutation rejects assigning bots/agents with an installation token, so issue
+> creation failed *after* the issue was already created — leaking an un-cleaned
+> issue on every run. The script now picks an assignable human and always captures
+> the issue number before assigning.
 
 ### Running in CI
 
