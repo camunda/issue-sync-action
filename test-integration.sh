@@ -23,8 +23,9 @@ TARGET_ISSUE=""
 EVENT_FILE=""
 
 # Close every open issue that belongs to the integration test, including leaks
-# from earlier failed runs. Matches by label AND by the "[integration-test]" title
-# prefix so nothing slips through even if a label failed to apply.
+# from earlier failed runs. Matches issues carrying the integration-test or
+# integration-test-synced label, OR the "[integration-test]" title prefix, so
+# nothing slips through even if a label failed to apply.
 sweep_integration_issues() {
     local nums num
     nums=$(
@@ -103,12 +104,19 @@ fi
 # Create the source issue first WITHOUT an assignee so the issue number is always
 # captured. If creation and assignment were combined and assignment failed, the
 # issue would still be created but its number lost — leaking an un-cleaned issue.
-SOURCE_ISSUE=$(gh issue create \
+# `gh issue create` prints the issue URL; extract the trailing number with a Bash
+# regex (portable, no PCRE/grep -P which is unavailable on e.g. macOS).
+SOURCE_ISSUE_URL=$(gh issue create \
     --repo "$REPO" \
     --title "[integration-test] $(date +%s)" \
     --body "Automated integration test. Will be cleaned up." \
-    --label "integration-test" \
-    | grep -oP '\d+$')
+    --label "integration-test")
+if [[ "$SOURCE_ISSUE_URL" =~ /([0-9]+)[[:space:]]*$ ]]; then
+    SOURCE_ISSUE="${BASH_REMATCH[1]}"
+else
+    echo "FAIL: Could not parse issue number from create output: ${SOURCE_ISSUE_URL}"
+    exit 1
+fi
 echo "Created source issue #${SOURCE_ISSUE}"
 
 # Assign the human separately (best-effort). The injected payload below is the
