@@ -21,6 +21,15 @@ SKIP_CLEANUP="${SKIP_CLEANUP:-}"
 SOURCE_ISSUE=""
 TARGET_ISSUE=""
 EVENT_FILE=""
+OUTPUT_FILE=""
+
+# Close a single issue by number (no-op for empty/non-numeric input).
+close_issue() {
+    local num="$1"
+    [[ "$num" =~ ^[0-9]+$ ]] || return 0
+    gh issue close "$num" --repo "$REPO" --reason "not planned" 2>/dev/null && \
+        echo "Closed #${num}" || echo "Failed to close #${num}"
+}
 
 # Close every open issue that belongs to the integration test, including leaks
 # from earlier failed runs. Matches issues carrying the integration-test or
@@ -39,8 +48,10 @@ sweep_integration_issues() {
         } | sort -un
     )
     for num in $nums; do
-        gh issue close "$num" --repo "$REPO" --reason "not planned" 2>/dev/null && \
-            echo "Closed #${num}" || echo "Failed to close #${num}"
+        # Skip issues already handled explicitly by cleanup() to avoid noisy
+        # double-close output (the close above may not be indexed here yet).
+        [[ "$num" == "$SOURCE_ISSUE" || "$num" == "$TARGET_ISSUE" ]] && continue
+        close_issue "$num"
     done
 }
 
@@ -50,14 +61,21 @@ cleanup() {
         [[ -n "$SOURCE_ISSUE" ]] && echo "  Source: https://github.com/${REPO}/issues/${SOURCE_ISSUE}"
         [[ -n "$TARGET_ISSUE" ]] && echo "  Target: https://github.com/${REPO}/issues/${TARGET_ISSUE}"
         [[ -f "$EVENT_FILE" ]] && rm -f "$EVENT_FILE"
+        [[ -f "$OUTPUT_FILE" ]] && rm -f "$OUTPUT_FILE"
         return
     fi
     echo ""
     echo "=== Cleanup ==="
-    # Sweep covers the tracked source/target issues as well as any historical leaks.
+    # Close the issues created by *this* run explicitly. They may not yet appear in
+    # the label/title listing below (GitHub indexing lag), so relying on the sweep
+    # alone would leak the freshly-created source/target issues.
+    close_issue "$SOURCE_ISSUE"
+    close_issue "$TARGET_ISSUE"
+    # Sweep historical leaks from earlier failed runs.
     sweep_integration_issues
-    # Remove temp event file
+    # Remove temp files
     [[ -f "$EVENT_FILE" ]] && rm -f "$EVENT_FILE"
+    [[ -f "$OUTPUT_FILE" ]] && rm -f "$OUTPUT_FILE"
 }
 trap cleanup EXIT
 
@@ -162,9 +180,14 @@ fi
 echo ""
 echo "=== Step 3: Run action ==="
 
+# Capture the action's outputs (issue_id_target) via GITHUB_OUTPUT so we can find
+# the synced issue deterministically, instead of racing GitHub's label indexing.
+OUTPUT_FILE=$(mktemp /tmp/issue-sync-test-output.XXXXXX)
+
 # @actions/core reads inputs from INPUT_* env vars (uppercased, hyphens -> underscores)
 GITHUB_TOKEN=$(gh auth token) \
 CI=true \
+GITHUB_OUTPUT="$OUTPUT_FILE" \
 GITHUB_EVENT_PATH="$EVENT_FILE" \
 GITHUB_EVENT_NAME=issues \
 GITHUB_REPOSITORY="$REPO" \
@@ -187,12 +210,19 @@ INPUT_ISSUE_CREATED_COMMENT_TEMPLATE="" \
 echo ""
 echo "=== Step 4: Verify ==="
 
-# Find the synced issue by the integration-test-synced label
-sleep 2  # give GitHub a moment to index
-TARGET_ISSUE=$(gh issue list --repo "$REPO" --label "integration-test-synced" --state open --json number --jq '.[0].number // empty')
+# Read the synced issue number straight from the action's output. @actions/core
+# writes outputs as multi-line blocks: "issue_id_target<<DELIM\n<value>\nDELIM".
+TARGET_ISSUE=$(
+    awk '
+        /^issue_id_target<</ { getline; print; exit }
+        /^issue_id_target=/ { sub(/^issue_id_target=/, ""); print; exit }
+    ' "$OUTPUT_FILE" | tr -d '[:space:]'
+)
+rm -f "$OUTPUT_FILE"
+OUTPUT_FILE=""
 
 if [[ -z "$TARGET_ISSUE" ]]; then
-    echo "FAIL: No synced issue found with label 'integration-test-synced'"
+    echo "FAIL: action did not emit an issue_id_target output — no synced issue created"
     exit 1
 fi
 echo "Found synced issue #${TARGET_ISSUE}"
