@@ -56,6 +56,11 @@ sweep_integration_issues() {
 }
 
 cleanup() {
+    # Cleanup is best-effort and runs as an EXIT trap. Disable errexit/pipefail
+    # for its duration so a transient `gh`/API error (rate limiting, network)
+    # during the sweep can't abort the trap early and flip a passing run to
+    # failed. The explicit `return 0` at the end keeps the script's exit status.
+    set +e +o pipefail
     if [[ -n "$SKIP_CLEANUP" ]]; then
         echo "SKIP_CLEANUP set — leaving issues open"
         [[ -n "$SOURCE_ISSUE" ]] && echo "  Source: https://github.com/${REPO}/issues/${SOURCE_ISSUE}"
