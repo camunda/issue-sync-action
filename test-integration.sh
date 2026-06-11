@@ -60,9 +60,8 @@ cleanup() {
         echo "SKIP_CLEANUP set — leaving issues open"
         [[ -n "$SOURCE_ISSUE" ]] && echo "  Source: https://github.com/${REPO}/issues/${SOURCE_ISSUE}"
         [[ -n "$TARGET_ISSUE" ]] && echo "  Target: https://github.com/${REPO}/issues/${TARGET_ISSUE}"
-        [[ -f "$EVENT_FILE" ]] && rm -f "$EVENT_FILE"
-        [[ -f "$OUTPUT_FILE" ]] && rm -f "$OUTPUT_FILE"
-        return
+        rm -f "$EVENT_FILE" "$OUTPUT_FILE"
+        return 0
     fi
     echo ""
     echo "=== Cleanup ==="
@@ -73,9 +72,11 @@ cleanup() {
     close_issue "$TARGET_ISSUE"
     # Sweep historical leaks from earlier failed runs.
     sweep_integration_issues
-    # Remove temp files
-    [[ -f "$EVENT_FILE" ]] && rm -f "$EVENT_FILE"
-    [[ -f "$OUTPUT_FILE" ]] && rm -f "$OUTPUT_FILE"
+    # Remove temp files (rm -f tolerates missing/empty paths)
+    rm -f "$EVENT_FILE" "$OUTPUT_FILE"
+    # Return success explicitly: this runs as an EXIT trap, so a non-zero status
+    # from the last command would override a passing run and fail CI.
+    return 0
 }
 trap cleanup EXIT
 
